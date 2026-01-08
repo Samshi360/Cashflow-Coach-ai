@@ -389,7 +389,7 @@ c1, c2 = st.columns(2)
 c1.metric("Liquidity risk (Before)", f"{rs_base['liquidity']}/100")
 c2.metric("Liquidity risk (After)", f"{rs['liquidity']}/100")
 
-    c3, c4 = st.columns(2)
+c3, c4 = st.columns(2)
     c3.metric("Rigidity risk (Before)", f"{rs_base['rigidity']}/100")
     c4.metric("Rigidity risk (After)", f"{rs['rigidity']}/100")
 
