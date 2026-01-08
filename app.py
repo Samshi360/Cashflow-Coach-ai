@@ -424,7 +424,7 @@ summary_blob = {
         },
         "top_expense_categories": cb.head(5).to_dict(orient="records"),
     }
-    summary_text = pd.Series(summary_blob).to_string()
+summary_text = pd.Series(summary_blob).to_string()
 
     if st.button("Generate coaching note"):
         with st.spinner("Generating coaching note..."):
