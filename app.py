@@ -393,7 +393,7 @@ c3, c4 = st.columns(2)
 c3.metric("Rigidity risk (Before)", f"{rs_base['rigidity']}/100")
 c4.metric("Rigidity risk (After)", f"{rs['rigidity']}/100")
 
-    st.caption(
+st.caption(
         f"Avg monthly income: ${rs['avg_monthly_income']} | "
         f"Avg monthly expenses: ${rs['avg_monthly_expenses']} | "
         f"Fixed-like share: {int(rs['fixed_share']*100)}% | "
