@@ -159,7 +159,7 @@ def risk_scores(df: pd.DataFrame, cash_on_hand: float = 0.0) -> dict:
 
 def runway_projection(df: pd.DataFrame, cash_on_hand: float) -> dict:
     # Keep a baseline copy, then apply what-if scenario
-df_base = df.copy()
+    df_base = df.copy()
 df_scn = apply_what_if_scenario(
     df_base,
     income_change_pct=income_change_pct,
