@@ -426,7 +426,7 @@ summary_blob = {
     }
 summary_text = pd.Series(summary_blob).to_string()
 
-    if st.button("Generate coaching note"):
+if st.button("Generate coaching note"):
         with st.spinner("Generating coaching note..."):
             coaching = generate_ai_coaching(summary_text)
         st.text_area("Coach output", coaching, height=360)
