@@ -386,8 +386,8 @@ st.metric("Income volatility risk", f"{rs['income_volatility']}/100", help="High
 st.metric("Overspending streak risk", f"{rs['overspend_streak']}/100", help="Higher = more consecutive deficit months.")
 st.markdown("### Before vs After (Scenario Impact)")
 c1, c2 = st.columns(2)
-    c1.metric("Liquidity risk (Before)", f"{rs_base['liquidity']}/100")
-    c2.metric("Liquidity risk (After)", f"{rs['liquidity']}/100")
+c1.metric("Liquidity risk (Before)", f"{rs_base['liquidity']}/100")
+c2.metric("Liquidity risk (After)", f"{rs['liquidity']}/100")
 
     c3, c4 = st.columns(2)
     c3.metric("Rigidity risk (Before)", f"{rs_base['rigidity']}/100")
