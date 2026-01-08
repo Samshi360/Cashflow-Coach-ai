@@ -412,7 +412,7 @@ st.caption(f"Avg monthly net cashflow (historical): ${rp.get('avg_monthly_net', 
 
     # Generate coaching summary
 st.subheader("AI coaching summary")
-    summary_blob = {
+summary_blob = {
         "cash_on_hand": cash_on_hand,
         "risk_scores": {k: rs[k] for k in ["liquidity", "rigidity", "income_volatility", "overspend_streak"]},
         "context": {
