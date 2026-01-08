@@ -169,7 +169,8 @@ df_scn = apply_what_if_scenario(
 )
 ms = monthly_summary(df_scn)
 if ms.empty:
-        return {"30d": None, "60d": None, "90d": None}
+    
+    return {"30d": None, "60d": None, "90d": None}
         
 # ----------------------------
 # What-if Scenario Simulator
