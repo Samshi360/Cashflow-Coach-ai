@@ -411,7 +411,7 @@ st.caption(f"Before scenario → 30d: ${rp_base['30d']} | 60d: ${rp_base['60d']}
 st.caption(f"Avg monthly net cashflow (historical): ${rp.get('avg_monthly_net', 0)}")
 
     # Generate coaching summary
-    st.subheader("AI coaching summary")
+st.subheader("AI coaching summary")
     summary_blob = {
         "cash_on_hand": cash_on_hand,
         "risk_scores": {k: rs[k] for k in ["liquidity", "rigidity", "income_volatility", "overspend_streak"]},
