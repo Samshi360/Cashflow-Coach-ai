@@ -96,8 +96,11 @@ def category_breakdown(df: pd.DataFrame) -> pd.DataFrame:
 def risk_scores(df: pd.DataFrame, cash_on_hand: float = 0.0) -> dict:
     ms = monthly_summary(df)
     if ms.empty:
-        return {"liquidity": 0, "rigidity": 0, "income_volatility": 0, "overspend_streak": 0,
-                "avg_monthly_income": 0, "avg_monthly_expenses": 0, "fixed_share": 0, "max_deficit_streak_months": 0}
+        return {
+            "liquidity": 0, "rigidity": 0, "income_volatility": 0, "overspend_streak": 0,
+            "avg_monthly_income": 0, "avg_monthly_expenses": 0, "fixed_share": 0,
+            "max_deficit_streak_months": 0, "avg_savings_rate": 0
+        }
 
     avg_exp = ms["expenses"].replace(0, np.nan).mean()
     avg_inc = ms["income"].replace(0, np.nan).mean()
@@ -136,6 +139,9 @@ def risk_scores(df: pd.DataFrame, cash_on_hand: float = 0.0) -> dict:
             streak = 0
     overspend = np.clip(25 * max_streak, 0, 100)
 
+    sr = ms["savings_rate"].replace([np.inf, -np.inf], np.nan).dropna()
+    avg_savings_rate = float(sr.mean()) if len(sr) else 0.0
+
     return {
         "liquidity": int(round(liquidity)),
         "rigidity": int(round(rigidity)),
@@ -145,6 +151,7 @@ def risk_scores(df: pd.DataFrame, cash_on_hand: float = 0.0) -> dict:
         "avg_monthly_expenses": round(avg_exp, 2),
         "fixed_share": round(fixed_share, 2),
         "max_deficit_streak_months": int(max_streak),
+        "avg_savings_rate": round(avg_savings_rate, 3),
     }
 
 
@@ -168,7 +175,7 @@ def runway_projection(df: pd.DataFrame, cash_on_hand: float) -> dict:
 
 
 # ----------------------------
-# What-if Scenario Simulator
+# Feature A: What-if Scenario Simulator
 # ----------------------------
 def apply_what_if_scenario(
     df: pd.DataFrame,
@@ -179,26 +186,21 @@ def apply_what_if_scenario(
 ) -> pd.DataFrame:
     dfx = df.copy()
 
-    # 1) Scale income
     income_mask = dfx["amount"] > 0
     if income_change_pct != 0:
         dfx.loc[income_mask, "amount"] = dfx.loc[income_mask, "amount"] * (1 + income_change_pct / 100.0)
 
-    # 2) Reduce Dining expenses
     if dining_cut_pct > 0:
         dining_mask = (dfx["category"] == "Dining") & (dfx["amount"] < 0)
         dfx.loc[dining_mask, "amount"] = dfx.loc[dining_mask, "amount"] * (1 - dining_cut_pct / 100.0)
 
-    # 3) Reduce Shopping expenses
     if shopping_cut_pct > 0:
         shop_mask = (dfx["category"] == "Shopping") & (dfx["amount"] < 0)
         dfx.loc[shop_mask, "amount"] = dfx.loc[shop_mask, "amount"] * (1 - shopping_cut_pct / 100.0)
 
-    # 4) Adjust Rent/Housing by a monthly fixed amount
     if rent_change_monthly != 0:
         rent_mask = (dfx["category"] == "Rent/Housing") & (dfx["amount"] < 0)
         rent_months = dfx.loc[rent_mask, "month"].unique()
-
         for m in rent_months:
             month_mask = rent_mask & (dfx["month"] == m)
             n = int(month_mask.sum())
@@ -207,6 +209,164 @@ def apply_what_if_scenario(
                 dfx.loc[month_mask, "amount"] = dfx.loc[month_mask, "amount"] - per_txn_adjustment
 
     return dfx
+
+
+# ----------------------------
+# Feature B: Financial Health Score
+# ----------------------------
+def financial_health_score(rs: dict) -> dict:
+    liquidity = rs.get("liquidity", 0)
+    rigidity = rs.get("rigidity", 0)
+    income_vol = rs.get("income_volatility", 0)
+    overspend = rs.get("overspend_streak", 0)
+
+    avg_sr = rs.get("avg_savings_rate", 0.0)
+    savings_boost = np.clip((avg_sr - 0.00) / 0.10 * 10, 0, 10)
+
+    weighted_risk = 0.35 * liquidity + 0.25 * rigidity + 0.20 * income_vol + 0.20 * overspend
+    score = int(np.clip(round(100 - weighted_risk + savings_boost), 0, 100))
+
+    if score >= 80:
+        label = "Healthy"
+    elif score >= 60:
+        label = "Good"
+    elif score >= 40:
+        label = "Watchlist"
+    else:
+        label = "High Risk"
+
+    return {"score": score, "label": label, "savings_boost": round(float(savings_boost), 1)}
+
+
+# ----------------------------
+# Feature C: Behavioral Pattern Flags
+# ----------------------------
+def behavioral_flags(df_base: pd.DataFrame, df_scn: pd.DataFrame) -> list:
+    flags = []
+    ms_base = monthly_summary(df_base)
+
+    if not ms_base.empty:
+        deficits = (ms_base["net_cashflow"] < 0).sum()
+        if deficits >= 2:
+            flags.append(f"Repeated deficit months detected ({int(deficits)} months).")
+
+        if len(ms_base) >= 2:
+            last2 = ms_base.tail(2)
+            inc_change = last2["income"].iloc[-1] - last2["income"].iloc[0]
+
+            exp = df_base[df_base["amount"] < 0].copy()
+            exp["spend"] = -exp["amount"]
+            dining_by_month = exp[exp["category"] == "Dining"].groupby("month")["spend"].sum()
+
+            if len(dining_by_month) >= 2:
+                d_last2 = dining_by_month.reindex(last2["month"]).fillna(0)
+                dining_change = d_last2.iloc[-1] - d_last2.iloc[0]
+                if inc_change < 0 and dining_change > 0:
+                    flags.append("Dining spend rose while income fell (behavioral mismatch).")
+
+        exp = df_base[df_base["amount"] < 0].copy()
+        exp["spend"] = -exp["amount"]
+        total_spend = exp["spend"].sum()
+        fixed_spend = exp[exp["category"].isin(FIXED_LIKE_CATEGORIES)]["spend"].sum()
+        if total_spend > 0 and (fixed_spend / total_spend) > 0.6:
+            flags.append("Fixed costs consume a large share of spending (limited flexibility).")
+
+        shop = df_base[(df_base["category"] == "Shopping") & (df_base["amount"] < 0)].copy()
+        if len(shop) >= 6:
+            shop["day"] = shop["date"].dt.day
+            mid = shop[(shop["day"] >= 10) & (shop["day"] <= 20)]["amount"].abs().sum()
+            early_late = shop[(shop["day"] < 10) | (shop["day"] > 20)]["amount"].abs().sum()
+            if mid > early_late:
+                flags.append("Shopping spend clusters mid-month (possible impulse window).")
+
+    if not df_scn.equals(df_base):
+        flags.append("Scenario applied: charts and scores reflect your what-if assumptions.")
+
+    return flags[:6]
+
+
+# ----------------------------
+# Feature D: Priority Actions Box
+# ----------------------------
+def priority_actions(rs: dict, cb: pd.DataFrame) -> list:
+    actions = []
+
+    risk_pairs = [
+        ("Liquidity risk", rs.get("liquidity", 0)),
+        ("Expense rigidity risk", rs.get("rigidity", 0)),
+        ("Income volatility risk", rs.get("income_volatility", 0)),
+        ("Overspending streak risk", rs.get("overspend_streak", 0)),
+    ]
+    risk_pairs.sort(key=lambda x: x[1], reverse=True)
+    top_risks = [r[0] for r in risk_pairs[:2]]
+
+    avg_exp = rs.get("avg_monthly_expenses", 0.0)
+    fixed_share = rs.get("fixed_share", 0.0)
+
+    if "Liquidity risk" in top_risks:
+        target_buffer = round(avg_exp * 2.0, 0) if avg_exp > 0 else 1000
+        actions.append({
+            "title": "Build a 2-month buffer",
+            "detail": f"Aim for ~${target_buffer:,.0f} cash buffer to reduce liquidity stress."
+        })
+
+    if "Expense rigidity risk" in top_risks:
+        actions.append({
+            "title": "Lower fixed costs (even slightly)",
+            "detail": f"Fixed-like share is ~{int(fixed_share*100)}%. Renegotiate one bill or remove 1 subscription."
+        })
+
+    if cb is not None and not cb.empty:
+        top_cat = cb.iloc[0]["category"]
+        top_spend = cb.iloc[0]["spend"]
+        cut_target = round(top_spend * 0.15, 0)
+        actions.append({
+            "title": f"Cut {top_cat} by ~15%",
+            "detail": f"Reducing {top_cat} by ~${cut_target:,.0f}/month improves runway and score quickly."
+        })
+
+    while len(actions) < 3:
+        actions.append({
+            "title": "Set a weekly discretionary cap",
+            "detail": "Pick a number you can stick to (e.g., $60/week). Consistency reduces overspending streaks."
+        })
+
+    return actions[:3]
+
+
+# ----------------------------
+# Feature E: Target Salary / Income Threshold
+# ----------------------------
+def target_salary_for_healthy_score(
+    rs: dict,
+    cash_on_hand: float,
+    target_savings_rate: float = 0.10,
+    target_buffer_months: float = 3.0,
+    buffer_build_months: int = 12
+) -> dict:
+    avg_exp = float(rs.get("avg_monthly_expenses", 0.0))
+    avg_inc = float(rs.get("avg_monthly_income", 0.0))
+
+    if avg_exp <= 0:
+        return {"target_monthly_income": None, "gap_monthly_income": None}
+
+    desired_buffer = target_buffer_months * avg_exp
+    buffer_gap = max(desired_buffer - cash_on_hand, 0.0)
+    buffer_build_per_month = buffer_gap / max(buffer_build_months, 1)
+
+    denom = max(1.0 - target_savings_rate, 0.01)
+    target_income = (avg_exp + buffer_build_per_month) / denom
+    gap = max(target_income - avg_inc, 0.0)
+
+    return {
+        "target_monthly_income": round(target_income, 2),
+        "gap_monthly_income": round(gap, 2),
+        "assumptions": {
+            "target_savings_rate": target_savings_rate,
+            "target_buffer_months": target_buffer_months,
+            "buffer_build_months": buffer_build_months
+        }
+    }
 
 
 # ----------------------------
@@ -257,8 +417,8 @@ def generate_ai_coaching(summary_text: str) -> str:
 st.set_page_config(page_title="CashFlow Coach AI", layout="wide")
 st.title("CashFlow Coach AI — Personal Cash-Flow Risk & Behavior Coach")
 st.caption(
-    "Upload a simple transactions CSV to get cash-flow insights, risk flags, a runway projection, "
-    "and an AI-generated coaching summary. This is educational, not professional financial advice."
+    "Upload a transactions CSV to get cash-flow insights, risk flags, runway projection, and coaching. "
+    "Educational only — not professional financial advice."
 )
 
 with st.sidebar:
@@ -315,7 +475,6 @@ if df is None:
 if do_autocat:
     df = auto_categorize(df)
 
-# Baseline vs Scenario dataframes
 df_base = df.copy()
 df_scn = apply_what_if_scenario(
     df_base,
@@ -325,7 +484,6 @@ df_scn = apply_what_if_scenario(
     rent_change_monthly=rent_change_monthly
 )
 
-# Layout
 left, right = st.columns([1.25, 1])
 
 with left:
@@ -335,7 +493,7 @@ with left:
     st.subheader("Monthly cash-flow summary (Scenario applied)")
     ms = monthly_summary(df_scn)
     if ms.empty:
-        st.error("No data available after applying the scenario. Try adjusting sliders or upload more transactions.")
+        st.error("No data available after applying the scenario. Adjust sliders or upload more transactions.")
         st.stop()
 
     st.dataframe(ms, use_container_width=True)
@@ -353,21 +511,24 @@ with left:
     st.dataframe(cb, use_container_width=True)
 
 with right:
-    st.subheader("Risk dashboard (Scenario)")
-
     rs_base = risk_scores(df_base, cash_on_hand=cash_on_hand)
     rs = risk_scores(df_scn, cash_on_hand=cash_on_hand)
+    hs = financial_health_score(rs)
 
-    st.metric("Liquidity risk", f"{rs['liquidity']}/100", help="Higher = less cash buffer vs typical expenses.")
-    st.metric("Expense rigidity risk", f"{rs['rigidity']}/100", help="Higher = larger fixed-like share of spending.")
-    st.metric("Income volatility risk", f"{rs['income_volatility']}/100", help="Higher = income varies month to month.")
-    st.metric("Overspending streak risk", f"{rs['overspend_streak']}/100", help="Higher = more consecutive deficit months.")
+    st.subheader("Financial Health Score")
+    st.metric("Health score", f"{hs['score']}/100")
+    st.write(f"**Status:** {hs['label']} | **Savings boost:** +{hs['savings_boost']} pts")
+
+    st.subheader("Risk dashboard (Scenario)")
+    st.metric("Liquidity risk", f"{rs['liquidity']}/100")
+    st.metric("Expense rigidity risk", f"{rs['rigidity']}/100")
+    st.metric("Income volatility risk", f"{rs['income_volatility']}/100")
+    st.metric("Overspending streak risk", f"{rs['overspend_streak']}/100")
 
     st.markdown("### Before vs After (Scenario Impact)")
     c1, c2 = st.columns(2)
     c1.metric("Liquidity risk (Before)", f"{rs_base['liquidity']}/100")
     c2.metric("Liquidity risk (After)", f"{rs['liquidity']}/100")
-
     c3, c4 = st.columns(2)
     c3.metric("Rigidity risk (Before)", f"{rs_base['rigidity']}/100")
     c4.metric("Rigidity risk (After)", f"{rs['rigidity']}/100")
@@ -376,8 +537,21 @@ with right:
         f"Avg monthly income: ${rs['avg_monthly_income']} | "
         f"Avg monthly expenses: ${rs['avg_monthly_expenses']} | "
         f"Fixed-like share: {int(rs['fixed_share']*100)}% | "
-        f"Max deficit streak: {rs['max_deficit_streak_months']} months"
+        f"Avg savings rate: {int(rs['avg_savings_rate']*100)}%"
     )
+
+    st.subheader("Behavioral pattern flags")
+    flags = behavioral_flags(df_base, df_scn)
+    if flags:
+        for f in flags:
+            st.info(f)
+    else:
+        st.success("No major behavioral red flags detected from this dataset.")
+
+    st.subheader("Priority actions (Top 3)")
+    acts = priority_actions(rs, cb)
+    for i, a in enumerate(acts, start=1):
+        st.write(f"**{i}. {a['title']}** — {a['detail']}")
 
     st.subheader("Runway projection (Scenario)")
     rp_base = runway_projection(df_base, cash_on_hand=cash_on_hand)
@@ -391,6 +565,21 @@ with right:
     st.caption(f"Before scenario → 30d: ${rp_base['30d']} | 60d: ${rp_base['60d']} | 90d: ${rp_base['90d']}")
     st.caption(f"Avg monthly net cashflow (historical): ${rp.get('avg_monthly_net', 0)}")
 
+    st.subheader("Target salary / income threshold")
+    target = target_salary_for_healthy_score(rs=rs, cash_on_hand=cash_on_hand)
+    if target.get("target_monthly_income") is None:
+        st.write("Not enough history to estimate a target income.")
+    else:
+        st.write(
+            f"To aim for a **healthy** profile with ~**10% saving** and building a **3-month buffer** over **12 months**, "
+            f"target about **${target['target_monthly_income']:,.0f}/month** income."
+        )
+        if target["gap_monthly_income"] > 0:
+            st.warning(f"That is about **${target['gap_monthly_income']:,.0f}/month** above your current estimated average income.")
+        else:
+            st.success("Your estimated income is already at/above this target under these assumptions.")
+        st.caption("Educational heuristic only — not financial advice.")
+
     st.subheader("AI coaching summary")
     summary_blob = {
         "cash_on_hand": cash_on_hand,
@@ -400,13 +589,17 @@ with right:
             "shopping_cut_pct": shopping_cut_pct,
             "rent_change_monthly": rent_change_monthly,
         },
+        "financial_health": hs,
         "risk_scores": {k: rs[k] for k in ["liquidity", "rigidity", "income_volatility", "overspend_streak"]},
+        "behavioral_flags": flags,
+        "priority_actions": acts,
         "context": {
             "avg_monthly_income": rs["avg_monthly_income"],
             "avg_monthly_expenses": rs["avg_monthly_expenses"],
             "fixed_like_share": rs["fixed_share"],
-            "max_deficit_streak_months": rs["max_deficit_streak_months"],
+            "avg_savings_rate": rs["avg_savings_rate"],
             "runway_projection": rp,
+            "target_salary_estimate": target,
         },
         "top_expense_categories": cb.head(5).to_dict(orient="records"),
     }
