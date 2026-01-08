@@ -158,10 +158,72 @@ def risk_scores(df: pd.DataFrame, cash_on_hand: float = 0.0) -> dict:
     }
 
 def runway_projection(df: pd.DataFrame, cash_on_hand: float) -> dict:
-    ms = monthly_summary(df)
+    # Keep a baseline copy, then apply what-if scenario
+df_base = df.copy()
+df_scn = apply_what_if_scenario(
+    df_base,
+    income_change_pct=income_change_pct,
+    dining_cut_pct=dining_cut_pct,
+    shopping_cut_pct=shopping_cut_pct,
+    rent_change_monthly=rent_change_monthly
+)
+    ms = monthly_summary(df_scn)
     if ms.empty:
         return {"30d": None, "60d": None, "90d": None}
+        
+# ----------------------------
+# What-if Scenario Simulator
+# ----------------------------
+def apply_what_if_scenario(
+    df: pd.DataFrame,
+    income_change_pct: float,
+    dining_cut_pct: float,
+    shopping_cut_pct: float,
+    rent_change_monthly: float
+) -> pd.DataFrame:
+    """
+    Returns a modified copy of df based on simple what-if assumptions:
+    - Income transactions are scaled by income_change_pct
+    - Dining and Shopping expenses are reduced by their cut %
+    - Rent/Housing expenses are increased/decreased by a fixed monthly amount
+      (distributed evenly across rent transactions by month)
+    """
+    dfx = df.copy()
 
+    # 1) Scale income
+    income_mask = dfx["amount"] > 0
+    if income_change_pct != 0:
+        dfx.loc[income_mask, "amount"] = dfx.loc[income_mask, "amount"] * (1 + income_change_pct / 100.0)
+
+    # 2) Reduce Dining expenses
+    if dining_cut_pct > 0:
+        dining_mask = (dfx["category"] == "Dining") & (dfx["amount"] < 0)
+        dfx.loc[dining_mask, "amount"] = dfx.loc[dining_mask, "amount"] * (1 - dining_cut_pct / 100.0)
+
+    # 3) Reduce Shopping expenses
+    if shopping_cut_pct > 0:
+        shop_mask = (dfx["category"] == "Shopping") & (dfx["amount"] < 0)
+        dfx.loc[shop_mask, "amount"] = dfx.loc[shop_mask, "amount"] * (1 - shopping_cut_pct / 100.0)
+
+    # 4) Adjust Rent/Housing by a monthly fixed amount
+    # If rent_change_monthly is +100 => rent is 100 more expensive each month (more negative).
+    # If rent_change_monthly is -100 => rent is 100 cheaper each month (less negative).
+    if rent_change_monthly != 0:
+        rent_mask = (dfx["category"] == "Rent/Housing") & (dfx["amount"] < 0)
+
+        # Identify months where rent exists
+        rent_months = dfx.loc[rent_mask, "month"].unique()
+
+        for m in rent_months:
+            month_mask = rent_mask & (dfx["month"] == m)
+            n = int(month_mask.sum())
+            if n > 0:
+                per_txn_adjustment = rent_change_monthly / n
+                # Rent expenses are negative. Increasing rent means making the number more negative.
+                dfx.loc[month_mask, "amount"] = dfx.loc[month_mask, "amount"] - per_txn_adjustment
+
+    return dfx
+    
     avg_monthly_net = ms["net_cashflow"].mean()  # could be positive or negative
     # Conservative: assume net cashflow stays at historical average
     def proj(days: int):
@@ -240,6 +302,14 @@ with st.sidebar:
     do_autocat = st.checkbox("Auto-categorize missing categories", value=True)
 
     st.divider()
+    st.subheader("What-If Scenario Simulator")
+
+    income_change_pct = st.slider("Income change (%)", min_value=-30, max_value=30, value=0, step=1)
+    dining_cut_pct = st.slider("Reduce Dining spend (%)", min_value=0, max_value=60, value=0, step=5)
+    shopping_cut_pct = st.slider("Reduce Shopping spend (%)", min_value=0, max_value=60, value=0, step=5)
+    rent_change_monthly = st.slider("Rent change ($/month)", min_value=-300, max_value=300, value=0, step=25)
+
+    st.divider()
     st.subheader("Sample CSV")
     if st.button("Load built-in sample data"):
         sample = pd.DataFrame([
@@ -307,12 +377,21 @@ with left:
 
 with right:
     st.subheader("Risk dashboard")
-    rs = risk_scores(df, cash_on_hand=cash_on_hand)
-
+    rs_base = risk_scores(df_base, cash_on_hand=cash_on_hand)
+rs = risk_scores(df_scn, cash_on_hand=cash_on_hand)
+    
     st.metric("Liquidity risk", f"{rs['liquidity']}/100", help="Higher = less cash buffer vs typical expenses.")
     st.metric("Expense rigidity risk", f"{rs['rigidity']}/100", help="Higher = larger fixed-like share of spending.")
     st.metric("Income volatility risk", f"{rs['income_volatility']}/100", help="Higher = income see-saws month to month.")
     st.metric("Overspending streak risk", f"{rs['overspend_streak']}/100", help="Higher = more consecutive deficit months.")
+st.markdown("### Before vs After (Scenario Impact)")
+    c1, c2 = st.columns(2)
+    c1.metric("Liquidity risk (Before)", f"{rs_base['liquidity']}/100")
+    c2.metric("Liquidity risk (After)", f"{rs['liquidity']}/100")
+
+    c3, c4 = st.columns(2)
+    c3.metric("Rigidity risk (Before)", f"{rs_base['rigidity']}/100")
+    c4.metric("Rigidity risk (After)", f"{rs['rigidity']}/100")
 
     st.caption(
         f"Avg monthly income: ${rs['avg_monthly_income']} | "
@@ -322,11 +401,13 @@ with right:
     )
 
     st.subheader("Runway projection (cash leaving/entering continues as historical average)")
-    rp = runway_projection(df, cash_on_hand=cash_on_hand)
-    c1, c2, c3 = st.columns(3)
+rp_base = runway_projection(df_base, cash_on_hand=cash_on_hand)
+rp = runway_projection(df_scn, cash_on_hand=cash_on_hand)
+      c1, c2, c3 = st.columns(3)
     c1.metric("30 days", f"${rp['30d']}")
     c2.metric("60 days", f"${rp['60d']}")
     c3.metric("90 days", f"${rp['90d']}")
+st.caption(f"Before scenario → 30d: ${rp_base['30d']} | 60d: ${rp_base['60d']} | 90d: ${rp_base['90d']}")
     st.caption(f"Avg monthly net cashflow (historical): ${rp.get('avg_monthly_net', 0)}")
 
     # Generate coaching summary
