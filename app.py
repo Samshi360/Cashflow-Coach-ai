@@ -168,7 +168,7 @@ df_scn = apply_what_if_scenario(
     rent_change_monthly=rent_change_monthly
 )
 ms = monthly_summary(df_scn)
-    if ms.empty:
+if ms.empty:
         return {"30d": None, "60d": None, "90d": None}
         
 # ----------------------------
