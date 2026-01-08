@@ -400,7 +400,7 @@ st.caption(
         f"Max deficit streak: {rs['max_deficit_streak_months']} months"
     )
 
-    st.subheader("Runway projection (cash leaving/entering continues as historical average)")
+st.subheader("Runway projection (cash leaving/entering continues as historical average)")
 rp_base = runway_projection(df_base, cash_on_hand=cash_on_hand)
 rp = runway_projection(df_scn, cash_on_hand=cash_on_hand)
       c1, c2, c3 = st.columns(3)
