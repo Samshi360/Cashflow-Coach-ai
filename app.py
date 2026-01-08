@@ -380,7 +380,7 @@ with right:
     rs_base = risk_scores(df_base, cash_on_hand=cash_on_hand)
 rs = risk_scores(df_scn, cash_on_hand=cash_on_hand)
     
-    st.metric("Liquidity risk", f"{rs['liquidity']}/100", help="Higher = less cash buffer vs typical expenses.")
+st.metric("Liquidity risk", f"{rs['liquidity']}/100", help="Higher = less cash buffer vs typical expenses.")
     st.metric("Expense rigidity risk", f"{rs['rigidity']}/100", help="Higher = larger fixed-like share of spending.")
     st.metric("Income volatility risk", f"{rs['income_volatility']}/100", help="Higher = income see-saws month to month.")
     st.metric("Overspending streak risk", f"{rs['overspend_streak']}/100", help="Higher = more consecutive deficit months.")
