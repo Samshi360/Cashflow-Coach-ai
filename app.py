@@ -403,7 +403,7 @@ st.caption(
 st.subheader("Runway projection (cash leaving/entering continues as historical average)")
 rp_base = runway_projection(df_base, cash_on_hand=cash_on_hand)
 rp = runway_projection(df_scn, cash_on_hand=cash_on_hand)
-      c1, c2, c3 = st.columns(3)
+    c1, c2, c3 = st.columns(3)
     c1.metric("30 days", f"${rp['30d']}")
     c2.metric("60 days", f"${rp['60d']}")
     c3.metric("90 days", f"${rp['90d']}")
