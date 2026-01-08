@@ -408,7 +408,7 @@ c1.metric("30 days", f"${rp['30d']}")
 c2.metric("60 days", f"${rp['60d']}")
 c3.metric("90 days", f"${rp['90d']}")
 st.caption(f"Before scenario → 30d: ${rp_base['30d']} | 60d: ${rp_base['60d']} | 90d: ${rp_base['90d']}")
-    st.caption(f"Avg monthly net cashflow (historical): ${rp.get('avg_monthly_net', 0)}")
+st.caption(f"Avg monthly net cashflow (historical): ${rp.get('avg_monthly_net', 0)}")
 
     # Generate coaching summary
     st.subheader("AI coaching summary")
